@@ -1,0 +1,478 @@
+---
+output: pdf_document
+---
+
+# FE590.  Assignment #4.
+
+
+## Enter Your Name Here, or "Anonymous" if you want to remain anonymous..
+## `r format(Sys.time(), "%Y-%m-%d")`
+
+
+I pledge on my honor that I have not given or received any unauthorized assistance on this assignment/examination. I further pledge that I have not copied any material from a book, article, the Internet or any other source except where I have expressly cited the source.
+
+By filling out the following fields, you are signing this pledge.  No assignment will get credit without being pledged.
+
+Name:Tingyi Lu
+
+CWID:10440683
+
+Date:11/20/2019
+
+# Instructions
+
+
+When you have completed the assignment, knit the document into a PDF file, and upload _both_ the .pdf and .Rmd files to Canvas.
+
+Note that you must have LaTeX installed in order to knit the equations below.  If you do not have it installed, simply delete the questions below.
+```{r}
+CWID = 10440683 #Place here your Campus wide ID number, this will personalize
+#your results, but still maintain the reproduceable nature of using seeds.
+#If you ever need to reset the seed in this assignment, use this as your seed
+#Papers that use -1 as this CWID variable will earn 0's so make sure you change
+#this value before you submit your work.
+personal = CWID %% 10000
+set.seed(personal)
+```
+# Question 1:
+In this assignment, you will be required to find a set of data to run regression on.  This data set should be financial in nature, and of a type that will work with the models we have discussed this semester (hint: we didn't look at time series)  You may not use any of the data sets in the ISLR package that we have been looking at all semester.  Your data set that you choose should have both qualitative and quantitative variables. (or has variables that you can transform)
+
+Provide a description of the data below, where you obtained it, what the variable names are and what it is describing.
+
+Objective: This project aims to determine the relationship between Korea Stock Exchange and stock markets in many other countries by analyzing their Stock Indexes.
+
+Data source: The dataset was downloaded from https://finance.yahoo.com, ranging from 11/19/2009 - 11/19/2019.
+
+##Load in data
+```{r}
+data <- read.csv("data.csv")
+head(data)
+
+#transform the raw data
+for(i in 2:12){
+  data[,i] <- as.numeric(data[,i])
+}
+```
+1 Response variable:
+KS11: KOSPI Composite Index, Korea Stock Exchange
+
+10 Explanatory Variables:
+shanghai: SSE Composite Index, ShangHai Stock Exchange, China  
+AXJO: S&P/ASX 200 index, Australian Securities Exchange  
+GDAXI: German stock index  
+HSI: Hang Seng Index, Hong Kong  
+JKSE: Jakarta Stock Exchange Composite Index  
+MERV: Buenos Aires  
+MXX: Mexio IPC Index  
+N100: EURONEXT 100 Index, Europe  
+N255: Nikkei index, Tokyo  
+S.P.500: S&P 500 Index, America  
+  
+Other variable: The date on which price was recorded.  
+
+
+##Data prepariation:
+Since all the values in the dataset are the actural price. I will first satandardize the data by calculating the continous compounded return, which is log return of each indexes.
+
+Calculating log return
+```{r}
+for(i in 2:12){
+a <- diff(log(as.numeric(data[,i])))
+a <- c(0,a)
+data[,i] <- a
+}
+```
+
+```{r}
+data <- data[-1,]
+data[,1] <- as.Date(data[,1], format="%m/%d/%y")
+head(data)
+```
+
+Ttransform the data into df.
+```{r}
+df<- data.frame(data)
+head(df)
+nrow(df)
+```
+
+```{r}
+dim(df)
+```
+
+##Create a qualitative variable by categorizing KS11 as Bullish for positive return and Bearish for negative return.
+```{r}
+ksTrend <- rep("Bullish",2430) 
+ksTrend[data$KS11<0] <- "Bearish" 
+df$ksTrend <- ksTrend
+df$ksTrend <- as.factor(df$ksTrend)
+summary(df)
+```
+
+Check missing values, simply drop if there is any.
+```{r}
+df<- na.omit(df)
+nrow(df)
+```
+The data is clean without any missing values, so now I can do further analysis.
+
+
+# Question 2:
+Pick a quantitative variable and fit at least four different models in order to predict that variable using the other predictors.  Determine which of the models is the best fit.  You will need to provide strong reasons as to why the particular model you chose is the best one.  You will need to confirm the model you have selected provides the best fit and that you have obtained the best version of that particular model (i.e. subset selection or validation for example).  You need to convince the grader that you have chosen the best model.
+
+##Split the data into training and testing set.
+```{r}
+x <- sample(length(df$Date),as.integer(length(df$Date)*80/100))
+train <- df[x,]
+test <- df[-x,]
+nrow(train)
+nrow(test)
+```
+
+Correlation matrix.
+```{r}
+source("http://www.sthda.com/upload/rquery_cormat.r")
+mydata <- train[, c(2:12)]
+require("corrplot")
+cor <- rquery.cormat(mydata)
+```
+
+```{r}
+cor$r
+```
+
+```{r}
+cor$p
+```
+It seems this dataset has low dependency among each other, the only relatively highest correlation is between KS11 and MXX. 
+
+
+```{r}
+colnames(train)
+```
+
+(1) Simple Linesr Regression Model: Select the best 1 variable using regsubsets model.
+```{r}
+library(leaps)
+s <- regsubsets(KS11 ~ AXJO + GDAXI + HSI + JKSE + N255 + MERV + MXX  + N100 + 
+                  shanghai + S.P.500, data= train, method= "exhaustive",nvmax = 10)
+
+summary(s)[7]
+```
+From the summary, the best 1 variable model is with MXX, which is Mexio IPC Index. This result is the same as what I got from the previous correlation matrix.
+So, I begin with a simple linear regression model using MXX as variable.
+```{r}
+model1 <- lm(KS11 ~ MXX, data=train)
+summary(model1)
+```
+The explanatory variable MXX is significant with a small p-value.
+
+
+Test the model:
+```{r}
+p1<- predict(model1,newdata = test)
+e1 <- mean((test$KS11 - p1)^2)
+e1
+```
+The MSE of this model is 0.06368045, which is relatively small. So this model might be good.
+
+(2)Multiple Linear Regression. Find the best model with the help of Mallow Cp.
+```{r}
+c <- summary(s)$cp
+c
+```
+
+```{r}
+#plot the Cp statistics
+plot(c ,xlab =" Number of Variables ",ylab="Cp",type='b')
+
+#plot a red dot to indicate the model with minimized Cp statistics
+
+points (which.min(c), c[which.min(c)], col ="red",cex =2, pch =20)
+```
+
+ Model with 4 variables is the best, as it has the minimum Mallows Cp.
+
+
+```{r}
+summary(s)[7]
+coef(s,4)
+```
+The 4 selected variables are HSI,JKSE,MXX,S.P.500
+
+Now build a multiple regression  model using these 4 variables.
+```{r}
+model2 <- lm(KS11 ~ HSI+JKSE+MXX+S.P.500,data=train)
+summary(model2)
+```
+Since the variable S.P.500 is not so significant, I will drop this variable and run the model again.
+
+
+```{r}
+new_model2 <- lm(KS11 ~ HSI + JKSE  + MXX, data=train)
+summary(new_model2)
+```
+Now all variables are significant, and the Adj R-squared of the model is 0.08, which is higher than  model 1. So this model might be better. 
+
+
+Test model2:
+```{r}
+p2 <- predict(new_model2,newdata = test)
+e2 <- mean((test$KS11 - p2)^2)
+e2
+```
+
+(3)Support Vector Regression using the same selected variables from Msllow Cp.
+```{r}
+#install.packages("e1071")
+library(e1071)
+model3 <- svm(KS11 ~ HSI + JKSE + MXX + S.P.500,data=train, type= "eps-regression")
+
+```
+
+```{r}
+p3 <- predict(model3, newdata = test)
+e3=mean((test$KS11 - p3)^2)
+e3
+```
+
+(4)Random Forest Regression
+```{r}
+library(randomForest)
+model4 <- randomForest(x=train[,c(5,6,9,12)],y=train$KS11,ntree = 500)
+```
+
+```{r}
+p4 <- predict(model4,newdata = test)
+e4=mean((test$KS11 - p4)^2)
+e4
+```
+
+Comparison table of MSE for all the models:
+```{r}
+data.frame("MSE"=c("model1"=e1,"model2"=e2,"model3"=e3,"model4"=e4))
+```
+Bsed on the result, model2, which is Multiple Regression Model, is the best with the lowest MSE.
+
+
+
+#Question 3:
+Do the same approach as in question 2, but this time for a qualitative variable.
+
+The same variables selected from Mallow Cp are used to build following models.
+(1) Logistic Regression Model
+```{r}
+dirTest <- test$ksTrend
+
+m1 <- glm(ksTrend ~ HSI+JKSE+MXX+S.P.500,data=train,family = binomial)
+summary(m1)
+```
+
+Prediction:
+```{r}
+prob <- predict(m1, test,type = "response")
+contrasts(test$ksTrend)
+```
+
+
+```{r}
+predicted.class <- ifelse(prob > 0.5,"Bullish", " Bearlish")
+head(predicted.class)
+```
+
+```{r}
+table(predicted.class,dirTest)
+```
+
+```{r}
+e11 <- mean(predicted.class != dirTest)
+e11
+```
+
+(2)LDA model
+```{r}
+library(MASS)
+m2  <-  lda(ksTrend ~  HSI + JKSE + MXX + S.P.500,data=train)
+```
+
+```{r}
+p22 <- predict(m2,test)$class
+```
+
+```{r}
+table(p22,dirTest)
+```
+
+```{r}
+e22 <- mean(p22 != dirTest)
+e22
+```
+
+(4) QDA model
+```{r}
+m3 <- qda(ksTrend ~  HSI + JKSE + MXX + S.P.500,data=train)
+
+```
+
+```{r}
+p33 <- predict(m3,test)$class
+table(p33,dirTest)
+e33 <- mean(p33 != dirTest)
+e33
+```
+
+(4)KNN
+```{r}
+trainKNN  <- as.matrix(data.frame(train$HSI,train$JKSE,train$MXX,train$S.P.500))
+testKNN <- as.matrix(data.frame(test$HSI,test$JKSE,test$MXX,test$S.P.500))
+dirTrain <- train$ksTrend
+```
+
+Try KNN from k=1 to k=50
+```{r}
+library(class)
+e44 <- NULL
+for(i in 1:50){
+  set.seed(personal)
+  pKNN  <- knn(trainKNN, testKNN, dirTrain, k=i)
+  e44[i] <- mean(pKNN != dirTest)
+}
+```
+
+```{r}
+plot(e44, type = "b",xlab = "k",ylab = "Error",col="red")
+points(which.min(e44),e44[which.min(e44)],pch=20, col="blue")
+```
+
+```{r}
+which.min(e44)
+```
+I got the minimum misclassification error at k = 32. So I can build a knn model with k=32.
+
+```{r}
+m4 <- knn(trainKNN,testKNN, dirTrain, k=which.min(e44))
+#confusion matrix
+table(m4,dirTest)
+```
+
+```{r}
+error4 <- mean(m4 != dirTest)
+error4
+```
+
+(5)Random Forest Tree
+```{r}
+set.seed(personal)
+
+m5 <- randomForest(ksTrend ~  HSI + JKSE + MXX + S.P.500,data = train, importance=TRUE)
+m5                  
+  
+
+```
+```{r}
+p55 <- predict(m5,newdata = test,type = "class")
+```
+
+```{r}
+#confusion matrix
+table(p55, dirTest)
+```
+
+```{r}
+e55 <- mean(p55 != dirTest)
+e55
+```
+
+##Comparison of the results:
+```{r}
+table <- data.frame("Methods"=c("Logistic Regression","LDA","QDA","KNN","RandomForest"),
+                    "Misclassification Errors"=c(e11,e22,e33,error4,e55))
+table
+```
+From the result, LDA model has the lowest misclassification error of 0.4588477. So LDA model is the best for this qualitive variable. 
+Overall, the accuracy is not high, maybe this is because stock index is acturally more related to other factors such as political issues, which may be included in future work for this research topic.
+
+
+
+#Question 4:
+(Based on ISLR Chapter 9 #7) In this problem, you will use support vector approaches in order to
+predict whether a given car gets high or low gas mileage based on the Auto data set.
+
+##(a)
+Create a binary variable that takes on a 1 for cars with gas mileage above the median, and a 0 for cars with gas mileage below the median.
+```{r}
+library(ISLR)
+attach(Auto)
+med_gas=median(Auto$mpg)
+new_var = ifelse(mpg >med_gas,1,0)
+Auto$mpglevel = as.factor(new_var)
+
+```
+
+
+##(b)
+Fit a support vector classifier to the data with various values of cost, in order to predict whether a car gets high or low gas mileage. Report the cross-validation errors associated with different values of this parameter. Comment on your results.
+
+```{r}
+library(e1071)
+set.seed(personal)
+tune.out = tune(svm, mpglevel~., data = Auto, kernel="linear",
+                ranges = list(cost=seq(1,20),by=1))
+                                                                            
+summary(tune.out)
+              
+```
+Best cost is 1 with the best performance of 0.007628205.
+
+##(c)
+Now repeat for (b), this time using SVMs with radial and polynomial basis kernels, with different values of gamma and degree and cost. Comment on your results.
+```{r}
+set.seed(personal)
+tune.out <- tune(svm, mpglevel ~ ., data = Auto, kernel = "polynomial", 
+                 ranges = list(cost = c( 0.1, 1, 5, 10, 20,25,30,35,50,70,80,100), 
+                 degree = c(2, 3, 4,5)))
+summary(tune.out)
+```
+For a polynomial kernel, the lowest cross-validation error is obtained for a degree of 2 and a cost of 80.
+
+
+```{r}
+set.seed(personal)
+tune.out <- tune(svm, mpglevel ~ ., data = Auto, kernel = "radial", 
+                 ranges = list(cost = c( 0.1, 1, 5, 10, 20,25,30,35,50,70,80,100), 
+                 gamma=c( 0.1, 1, 5, 10, 20,25,30,35,50,70,80,100)))
+summary(tune.out)
+```
+
+For a radial kernel, the lowest cross-validation error is obtained for a gamma of 0.1 and a cost of 10.
+
+
+##(d)
+Make some plots to back up your assertions in (b) and (c). Hint: In the lab, we used the plot() function for svm objects only in cases with p=2 When p>2,you can use the plot() function to create plots displaying pairs of variables at a time. Essentially, instead of typing plot(svmfit , dat) where svmfit contains your fitted model and dat is a data frame containing your data, you can type plot(svmfit , dat, x1~x4) in order to plot just the first and fourth variables. However, you must replace x1 and x4 with the correct variable names. To find out more, type ?plot.svm.
+
+```{r}
+svm.linear = svm(mpglevel ~ ., data = Auto, kernel = "linear", cost = 1) 
+svm.pl = svm(mpglevel ~ ., data = Auto, kernel = "polynomial", cost = 80,degree = 2)
+svm.rd = svm(mpglevel ~ ., data = Auto, kernel = "radial", cost = 10, gamma = 0.1) 
+plots = function(x) {
+      for (name in names(Auto)[!(names(Auto) %in% c("mpg", "mpglevel", "name"))]) {
+          plot(x, Auto, as.formula(paste("mpg~", name, sep = "")))
+      } 
+}
+```
+
+
+```{r}
+plots(svm.linear)
+```
+
+
+
+```{r}
+plots(svm.pl)
+```
+
+```{r}
+plots(svm.rd)
+```
+
